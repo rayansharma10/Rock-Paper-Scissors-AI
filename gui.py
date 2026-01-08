@@ -105,7 +105,7 @@ class RPSGui:
         """Request a combined figure from DataManager and embed it."""
         # update the persistent axes in-place to minimize redraw work
         data_manager.plot_win_rate(ax=self.ax0)
-        data_manager.plot_last_moves(n=3, ax=self.ax1)
+        data_manager.plot_last_moves(n=7, ax=self.ax1)
 
         # efficient redraw
         try:

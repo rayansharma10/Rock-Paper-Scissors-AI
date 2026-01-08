@@ -112,94 +112,145 @@ class DataManager:
                 history.append(p / i)
         return history
 
-    def plot_win_rate(self, ax: Optional[plt.Axes] = None, exclude_ties: bool = False) -> plt.Axes:
-        """Plot cumulative player win rate over rounds. Returns the axes used."""
-        hist = self.win_rate_history(exclude_ties=exclude_ties)
+    def plot_win_rate(self, ax: Optional[plt.Axes] = None, exclude_ties: bool = False, show_draw_rate: bool = True, show_ai_rate: bool = True) -> plt.Axes:
+        """Plot cumulative player win rate and (optionally) draw and AI win rates.
+
+        - Player win rate is either p/rounds or p/(p+a) when exclude_ties=True.
+        - AI win rate mirrors the player logic.
+        - Draw rate is ties/rounds.
+        Returns the axes used."""
+        # player win history (already supports exclude_ties)
+        hist_p = self.win_rate_history(exclude_ties=exclude_ties)
+
+        # compute ai win rate history and draw rate history
+        hist_a: List[float] = []
+        hist_d: List[float] = []
+        p = a = t = 0
+        for i, (_, _, res) in enumerate(self.rounds, start=1):
+            if res == "player":
+                p += 1
+            elif res == "ai":
+                a += 1
+            else:
+                t += 1
+
+            if exclude_ties:
+                denom = p + a
+                hist_p_val = (p / denom) if denom > 0 else 0.0
+                hist_a_val = (a / denom) if denom > 0 else 0.0
+            else:
+                hist_p_val = p / i
+                hist_a_val = a / i
+
+            hist_d.append(t / i)
+            hist_a.append(hist_a_val)
+
         if ax is None:
             fig, ax = plt.subplots()
         else:
             # clear existing artists for an in-place redraw
             ax.clear()
-        ax.plot(range(1, len(hist) + 1), hist, marker="o", linestyle="-", color="#2c7fb8")
-        # dynamic y-limits that stay within [0,1] but give a little padding
-        if hist:
-            ymin = max(0.0, min(hist) - 0.05)
-            ymax = min(1.0, max(hist) + 0.05)
-            # if flat line (ymin==ymax), expand a tiny bit
+
+        rounds = list(range(1, len(hist_p) + 1))
+        # player line
+        ax.plot(rounds, hist_p, marker="o", linestyle="-", color="#2c7fb8", label="Player win rate")
+        # ai line
+        if show_ai_rate and hist_a:
+            ax.plot(range(1, len(hist_a) + 1), hist_a, marker="^", linestyle=":", color="#984ea3", label="AI win rate")
+        # draw line
+        if show_draw_rate and hist_d:
+            ax.plot(range(1, len(hist_d) + 1), hist_d, marker="s", linestyle="--", color="#ff7f00", label="Draw rate")
+
+        # dynamic y-limits based on all plotted series
+        vals = []
+        if hist_p:
+            vals.extend(hist_p)
+        if hist_a:
+            vals.extend(hist_a)
+        if hist_d:
+            vals.extend(hist_d)
+
+        if vals:
+            ymin = max(0.0, min(vals) - 0.05)
+            ymax = min(1.0, max(vals) + 0.05)
             if ymax - ymin < 0.01:
                 ymin = max(0.0, ymin - 0.02)
                 ymax = min(1.0, ymax + 0.02)
             ax.set_ylim(ymin, ymax)
-            # annotate last value
-            last_x = len(hist)
-            last_y = hist[-1]
-            ax.annotate(f"{last_y*100:.1f}%", xy=(last_x, last_y), xytext=(last_x, last_y + (ymax - ymin) * 0.04),
-                        ha="center", fontsize=9, color="#2c7fb8")
+
+            # annotate last values
+            last_x = len(rounds)
+            if hist_p:
+                ax.annotate(f"P {hist_p[-1]*100:.1f}%", xy=(last_x, hist_p[-1]), xytext=(last_x, hist_p[-1] + (ymax - ymin) * 0.04), ha="center", fontsize=9, color="#2c7fb8")
+            if show_ai_rate and hist_a:
+                ax.annotate(f"A {hist_a[-1]*100:.1f}%", xy=(last_x, hist_a[-1]), xytext=(last_x, hist_a[-1] - (ymax - ymin) * 0.04), ha="center", fontsize=9, color="#984ea3")
+            if show_draw_rate and hist_d:
+                ax.annotate(f"D {hist_d[-1]*100:.1f}%", xy=(last_x, hist_d[-1]), xytext=(last_x, hist_d[-1] - (ymax - ymin) * 0.08), ha="center", fontsize=9, color="#ff7f00")
         else:
             ax.set_ylim(0, 1)
+
         ax.set_xlabel("Round")
-        ax.set_ylabel("Player win rate")
-        ax.set_title("Cumulative Player Win Rate")
+        ax.set_ylabel("Rate")
+        ax.set_title("Cumulative Rates")
         ax.grid(alpha=0.3)
+        ax.legend(loc="upper left", fontsize=9)
         return ax
 
-    def plot_last_moves(self, n: int = 3, ax: Optional[plt.Axes] = None) -> plt.Axes:
-        """Compact, text-based display of the last `n` moves for player and AI.
+    def plot_last_moves(self, n: int = 7, ax: Optional[plt.Axes] = None) -> plt.Axes:
+        """Plain-text display of the last `n` rounds (larger text).
 
-        This renders small colored text boxes for each move; intended to be
-        visually small when embedded in the UI.
+        Renders two horizontal text lines (Player and AI). Winner move is green.
         """
         last = self.rounds[-n:]
         pad = n - len(last)
         padded = [None] * pad + last
 
         if ax is None:
-            # keep the subplot compact
-            fig, ax = plt.subplots(figsize=(max(1.2, n * 0.9), 0.9))
+            fig, ax = plt.subplots(figsize=(max(4.0, n * 0.6), 1.8))
         else:
-            # clear for in-place redraw
             ax.clear()
 
-        ax.set_xlim(0.5, n + 0.5)
-        ax.set_ylim(0, 2)
-        ax.axis('off')
+        ax.set_xlim(0, n + 1)
+        ax.set_ylim(0, 3)
+        ax.axis("off")
 
-        # draw small text boxes: top row = Player, bottom row = AI
+        # larger monospace font for alignment
+        label_font = dict(fontsize=11, fontfamily="monospace", color="#222")
+        move_font = dict(fontsize=14, fontfamily="monospace")
+
+        # leading labels
+        ax.text(0.2, 2.2, "Player:", ha="left", va="center", **label_font)
+        ax.text(0.2, 1.0, "AI:", ha="left", va="center", **label_font)
+
+        # color used to indicate the winner for a round
+        win_color = "#4daf4a"
+
         for i, item in enumerate(padded, start=1):
             if item is None:
-                p_text = '-'
-                a_text = '-'
-                p_color = '#ddd'
-                a_color = '#ddd'
+                p_text = "-"
+                a_text = "-"
+                p_color = a_color = "#222"
             else:
-                p_text, a_text, _ = item
-                p_color = MOVE_COLOR.get(p_text, '#999')
-                a_color = MOVE_COLOR.get(a_text, '#999')
+                p_text, a_text, res = item
+                p_color = a_color = "#222"
+                if res == "player":
+                    p_color = win_color
+                elif res == "ai":
+                    a_color = win_color
 
-            # player (top)
-            ax.text(i, 1.6, p_text, ha='center', va='center', fontsize=9,
-                    color='white', fontweight='bold',
-                    bbox=dict(facecolor=p_color, edgecolor='none', boxstyle='round,pad=0.2'))
-            # label small 'P' above the player boxes
-            ax.text(i, 1.85, 'P', ha='center', va='center', fontsize=7, color='#444')
+            ax.text(i, 2.2, p_text, ha="center", va="center", color=p_color, **move_font)
+            ax.text(i, 1.0, a_text, ha="center", va="center", color=a_color, **move_font)
 
-            # ai (bottom)
-            ax.text(i, 0.6, a_text, ha='center', va='center', fontsize=9,
-                    color='white', fontweight='bold',
-                    bbox=dict(facecolor=a_color, edgecolor='none', boxstyle='round,pad=0.2'))
-            # label small 'A' below the ai boxes
-            ax.text(i, 0.35, 'A', ha='center', va='center', fontsize=7, color='#444')
-
-        ax.set_title(f"Last {n} moves", fontsize=9)
+        ax.set_title(f"Last {n} rounds", fontsize=10)
         return ax
 
-    def combined_figure(self, n: int = 3, exclude_ties: bool = False) -> matplotlib.figure.Figure:
+    def combined_figure(self, n: int = 7, exclude_ties: bool = False) -> matplotlib.figure.Figure:
         """Return a matplotlib Figure containing the win-rate plot and last-moves plot.
 
         This is convenient for saving or embedding into a GUI canvas.
         """
-        fig = plt.figure(constrained_layout=True, figsize=(6, 4))
-        gs = fig.add_gridspec(2, 1, height_ratios=[2, 1])
+        fig = plt.figure(constrained_layout=True, figsize=(8, 4.5))
+        gs = fig.add_gridspec(2, 1, height_ratios=[2, 1.2])
         ax0 = fig.add_subplot(gs[0, 0])
         ax1 = fig.add_subplot(gs[1, 0])
 
